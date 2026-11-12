@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marsseg"
+version = "0.1.0"
+description = "Terrain segmentation for Mars rover driving on NASA JPL's AI4Mars dataset, with calibrated uncertainty and a drive-risk map"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "Christian Jair (Kister Space)"}]
+dependencies = [
+  "numpy>=1.24",
+  "pillow>=10",
+  "torch>=2.2",
+  "segmentation-models-pytorch>=0.4",
+  "timm>=1.0",
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7"]
+test = ["pytest>=7"]
+
+[project.scripts]
+marsseg = "marsseg.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["marsseg*"]

@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use marsseg, please cite it and the AI4Mars dataset paper (Swan et al. 2021)."
+title: "marsseg: terrain segmentation for Mars rover driving on AI4Mars, with calibrated uncertainty"
+version: 0.1.0
+date-released: 2026-11-12
+license: MIT
+repository-code: https://github.com/ChristianJair27/mars-terrain-seg
+authors:
+  - family-names: Jair
+    given-names: Christian
+    affiliation: Kister Space
+references:
+  - type: conference-paper
+    authors:
+      - family-names: Swan
+        given-names: R. Michael
+      - family-names: Atha
+        given-names: Deegan
+      - family-names: Leopold
+        given-names: Henry A.
+      - family-names: Gildner
+        given-names: Matthew
+      - family-names: Oij
+        given-names: Stephanie
+      - family-names: Chiu
+        given-names: Cindy
+      - family-names: Ono
+        given-names: Masahiro
+    title: "AI4MARS: A Dataset for Terrain-Aware Autonomous Driving on Mars"
+    conference:
+      name: "IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (AI4Space)"
+    year: 2021
+  - type: dataset
+    title: "AI4MARS: A Dataset for Terrain-Aware Autonomous Driving on Mars, version 0.6"
+    publisher:
+      name: "NASA Jet Propulsion Laboratory"
+    url: "https://zenodo.org/records/15995036"
