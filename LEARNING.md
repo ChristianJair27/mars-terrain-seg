@@ -79,6 +79,24 @@ Probamos la red, entrenada sólo con Curiosity en el cráter Gale, en fotos NAVC
 cráter Jezero: otra cámara (en color, más campo de visión), otro terreno, otra luz. Es una prueba **cualitativa**
 (no hay etiquetas de expertos para esas fotos); sirve para ver dónde sube la incertidumbre, no para dar una cifra.
 
+## 8. Lo que salió (12 de noviembre de 2026)
+
+- **Contra el artículo:** en el conjunto de expertos más estricto (`min3`) acertamos el 98,29 % de los píxeles;
+  el modelo de referencia de Swan et al. (2021) da 96,67 %. Es un solo entrenamiento (2,7 pasadas por los datos,
+  unos 70 minutos en la RTX 5070) y con otra versión del conjunto de datos, así que no es una comparación
+  controlada, pero confirma que un codificador moderno llega y pasa la línea base publicada.
+- **La roca grande engaña:** la red encuentra el 96 % de las rocas grandes de `min3`, pero también pinta roca
+  grande donde los expertos vieron roca madre o suelo; su IoU es sólo 0,36 (0,11 en `min1`). La matriz de
+  confusión del artículo, normalizada por filas, no puede mostrar esto. Probamos a cambiar el umbral de esa
+  clase con datos apartados: no mejora nada. La red está de acuerdo con los voluntarios y en desacuerdo con los
+  expertos sobre qué es una "roca grande"; hace falta la altura (estéreo), no otro umbral.
+- **Honesta en casa, confiada fuera:** con Curiosity el ECE es 4,3 % (casi calibrada, temperatura 1,025). Con
+  Perseverance, contra etiquetas de voluntarios, acierta el 63 % de los píxeles, mIoU 0,39, y el ECE sube a
+  21,9 %, mientras sus mapas de incertidumbre siguen tranquilos. Lección: la incertidumbre aprendida en un
+  dominio no avisa de que cambiaste de rover y de cráter.
+- **MC dropout** con una sola capa delante del clasificador apenas cambia nada (ECE 4,28 % frente a 4,31 %).
+  El siguiente paso serio sería un conjunto de varias redes (*deep ensemble*).
+
 ## Fuentes que leímos
 
 - Swan, R. M. et al. 2021, *AI4MARS: A Dataset for Terrain-Aware Autonomous Driving on Mars*, CVPR Workshops
