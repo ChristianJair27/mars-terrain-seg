@@ -104,7 +104,9 @@ def evaluate(model, root, splits=("test-min1", "test-min2", "test-min3"), device
             "ece": r["ece"], "reliability": {k: np.asarray(v).tolist() for k, v in r.items() if k != "ece"},
         }
         if temperature != 1.0 and not mc:
-            res[split]["ece_before_temperature"] = cal_raw.result()["ece"]
+            rr = cal_raw.result()
+            res[split]["ece_before_temperature"] = rr["ece"]
+            res[split]["reliability_raw"] = {k: np.asarray(v).tolist() for k, v in rr.items() if k != "ece"}
         print(f"{split}: acc {s['pixel_acc']:.4f} mIoU {s['miou']:.4f} ECE {r['ece']:.4f} "
               f"IoU {np.round(s['iou'], 3)}", flush=True)
     return res
@@ -135,3 +137,51 @@ def evaluate_pairs(model, pairs, device="cuda", long_side=512, temperature=1.0, 
     return {"n_images": len(pairs[:limit]), "n_pixels": s["n_pixels"], "pixel_acc": s["pixel_acc"],
             "miou": s["miou"], "iou": dict(zip(D.CLASSES, map(float, s["iou"]))),
             "confusion_row_pct": np.round(s["row_pct"], 2).tolist(), "ece": cal.result()["ece"]}
+
+
+@torch.no_grad()
+def fit_class_bias(model, samples, cls: int = 3, grid=None, device="cuda", size=512, temperature=1.0) -> dict:
+    """Post-hoc prior shift for one rare class: subtract b from its logit and pick the b that maximises that
+    class's IoU on held-out frames (never on the test set). Returns the sweep and the chosen b."""
+    grid = np.round(np.arange(0.0, 6.01, 0.5), 2) if grid is None else np.asarray(grid)
+    loader = DataLoader(D.EvalSet(samples, size), batch_size=4, num_workers=4)
+    cms = np.zeros((len(grid), 4, 4), np.int64)
+    for x, y, _ in loader:
+        x, y = x.to(device), y.to(device)
+        logits = model.segmentation_head(features(model, x).float()) / temperature
+        logits = F.interpolate(logits, size=y.shape[-2:], mode="bilinear", align_corners=False)
+        for k, b in enumerate(grid):
+            z = logits.clone()
+            z[:, cls] -= float(b)
+            cms[k] += confusion(z.argmax(1), y)
+    sweep = []
+    for b, cm in zip(grid, cms):
+        s = scores(cm)
+        sweep.append({"bias": float(b), "iou": float(s["iou"][cls]), "miou": float(s["miou"]),
+                      "recall": float(s["recall"][cls]),
+                      "precision": float(cm[cls, cls] / max(1, cm[:, cls].sum()))})
+    best = max(sweep, key=lambda r: r["iou"])
+    return {"class": D.CLASSES[cls], "sweep": sweep, "chosen_bias": best["bias"]}
+
+
+@torch.no_grad()
+def evaluate_with_bias(model, root, bias: float, cls: int = 3, splits=("test-min1", "test-min2", "test-min3"),
+                       device="cuda", size=512, temperature=1.0) -> dict:
+    res = {}
+    for split in splits:
+        loader = DataLoader(D.EvalSet(D.msl_samples(root, split), size), batch_size=2, num_workers=4)
+        cm = np.zeros((4, 4), np.int64)
+        for x, y, _ in loader:
+            x, y = x.to(device), y.to(device)
+            z = model.segmentation_head(features(model, x).float()) / temperature
+            z = F.interpolate(z, size=y.shape[-2:], mode="bilinear", align_corners=False)
+            z[:, cls] -= bias
+            cm += confusion(z.argmax(1), y)
+        s = scores(cm)
+        res[split] = {"pixel_acc": s["pixel_acc"], "miou": s["miou"], "iou": dict(zip(D.CLASSES, map(float, s["iou"]))),
+                      "precision_cls": float(cm[cls, cls] / max(1, cm[:, cls].sum())),
+                      "recall_cls": float(s["recall"][cls]),
+                      "confusion_row_pct": np.round(s["row_pct"], 2).tolist(), "confusion_counts": cm.tolist()}
+        print(f"{split} (bias {bias}): acc {s['pixel_acc']:.4f} mIoU {s['miou']:.4f} IoU {np.round(s['iou'], 3)}",
+              flush=True)
+    return res

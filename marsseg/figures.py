@@ -61,9 +61,27 @@ def infer(model, sample: D.Sample, mc=10):
     return img, lab, inv, p0.cpu().numpy(), entropy(p0).cpu().numpy(), mi[0].cpu().numpy()
 
 
-def examples(model, samples, out: Path, n=4, seed=3):
+def varied(samples, n=4, seed=3):
+    """One frame dominated by each class (soil, bedrock, sand) plus one with the most big-rock pixels,
+    each chosen at random among the qualifying frames, so the panel is not four views of plain soil."""
     rng = np.random.default_rng(seed)
-    pick = [samples[i] for i in rng.choice(len(samples), n, replace=False)]
+    dom = {c: [] for c in range(4)}
+    rocky = []
+    for s in samples:
+        lab = D.load_label(s)
+        cnt = np.bincount(lab[lab != D.IGNORE].ravel(), minlength=4)[:4]
+        if cnt.sum() < 50_000:
+            continue
+        dom[int(cnt.argmax())].append(s)
+        rocky.append((cnt[3], s))
+    pick = [dom[c][rng.integers(len(dom[c]))] for c in (0, 1, 2) if dom[c]]
+    pick.append(max(rocky, key=lambda t: t[0])[1])
+    return pick[:n]
+
+
+def examples(model, samples, out: Path, n=4, seed=3):
+    pick = varied(samples, n, seed)
+    n = len(pick)
     fig, axes = plt.subplots(n, 5, figsize=(17, 3.6 * n))
     titles = ["Curiosity NAVCAM", "expert label (min1)", "prediction", "uncertainty (entropy)", "drive risk"]
     for r, s in enumerate(pick):
@@ -104,10 +122,10 @@ def iou_bars(res: dict, out: Path, key="temperature_scaled"):
         for b, v in zip(bars, vals):
             ax.text(b.get_x() + b.get_width() / 2, v + 0.01, f"{v:.2f}", ha="center", fontsize=7.5)
     ax.set_xticks(x, D.CLASSES + ["mean (mIoU)"])
-    ax.set_ylim(0, 1.08)
+    ax.set_ylim(0, 1.22)
     ax.set_ylabel("IoU on the expert test set")
     ax.grid(axis="y", color=GRID, lw=0.5)
-    ax.legend(frameon=False, fontsize=9, loc="lower left")
+    ax.legend(frameon=False, fontsize=9, loc="upper center", ncol=3)
     ax.set_title("Per-class IoU by expert agreement level (minK = K of 3 experts labelled the pixel, 100 % agreement)",
                  fontsize=10)
     fig.tight_layout()
@@ -124,7 +142,7 @@ def confusion_vs_paper(res: dict, out: Path, key="temperature_scaled"):
         ax.imshow(m, cmap="Blues", vmin=0, vmax=100)
         for i in range(4):
             for j in range(4):
-                ax.text(j, i, f"{m[i, j]:.1f}", ha="center", va="center", color="black" if m[i, j] > 50 else FG,
+                ax.text(j, i, f"{m[i, j]:.1f}", ha="center", va="center", color="white" if m[i, j] > 60 else "#111111",
                         fontsize=10)
         ax.set_xticks(range(4), D.CLASSES)
         ax.set_yticks(range(4), D.CLASSES)
@@ -141,14 +159,16 @@ def confusion_vs_paper(res: dict, out: Path, key="temperature_scaled"):
 def reliability(res: dict, out: Path, mc_key: str):
     fig, ax = plt.subplots(figsize=(5.6, 5.2))
     ax.plot([0, 1], [0, 1], color=GRID, lw=1, ls="--")
-    for key, lab, col in [("raw", "softmax", "#f85149"), ("temperature_scaled", "temperature-scaled", "#58a6ff"),
-                          (mc_key, "temp.-scaled + MC dropout", "#3fb950")]:
-        r = res[key]["test-min1"]
-        rel = r["reliability"]
+    ts = res["temperature_scaled"]["test-min1"]
+    curves = [("softmax (T = 1)", "#f85149", ts["reliability_raw"], ts["ece_before_temperature"]),
+              (f"temperature-scaled (T = {res['temperature']:.2f})", "#58a6ff", ts["reliability"], ts["ece"]),
+              ("temp.-scaled + MC dropout", "#3fb950", res[mc_key]["test-min1"]["reliability"],
+               res[mc_key]["test-min1"]["ece"])]
+    for lab, col, rel, ece in curves:
         n = np.array(rel["bin_n"])
         ok = n > 200
         ax.plot(np.array(rel["bin_conf"])[ok], np.array(rel["bin_acc"])[ok], "o-", color=col, ms=4,
-                label=f"{lab}: ECE {100 * r['ece']:.2f} %")
+                label=f"{lab}: ECE {100 * ece:.2f} %")
     ax.set_xlabel("confidence of the predicted class")
     ax.set_ylabel("observed accuracy")
     ax.set_xlim(0.25, 1.0)
@@ -185,18 +205,19 @@ def hazard_demo(model, sample, out: Path):
 
 def training_curves(log_path: Path, out: Path):
     log = json.loads(Path(log_path).read_text())
-    ep = [r["epoch"] + 1 for r in log]
+    ep = [r.get("steps", 0) / 1000 for r in log]
     fig, ax = plt.subplots(figsize=(7, 3.6))
-    ax.plot(ep, [r["loss"] for r in log], "o-", color="#f85149", label="train loss")
+    ax.plot(ep, [r["loss"] for r in log], "o-", color="#f85149", label="train loss (mean over the epoch)")
     ax2 = ax.twinx()
-    ax2.plot(ep, [r["val_miou"] for r in log], "s-", color="#3fb950", label="val mIoU (crowd labels)")
-    ax.set_xlabel("epoch")
+    ax2.plot(ep, [r["val_miou"] for r in log], "s-", color="#3fb950", label="val mIoU (250 crowd-labelled frames)")
+    ax.set_xlabel("optimiser steps (thousands, batch 6)")
     ax.set_ylabel("loss")
     ax2.set_ylabel("mIoU")
     for a in (ax, ax2):
         a.tick_params(colors=FG)
     fig.legend(frameon=False, loc="upper center", ncol=2, fontsize=9)
     fig.tight_layout()
+    fig.subplots_adjust(top=0.88)
     fig.savefig(out, dpi=130)
     plt.close(fig)
 
@@ -224,6 +245,45 @@ def perseverance_panel(model, paths: list[Path], out: Path):
     plt.close(fig)
 
 
+def bias_sweep(res: dict, out: Path):
+    b = res["bigrock_bias"]
+    sw = b["sweep"]
+    x = [r["bias"] for r in sw]
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for key, col, lab in [("precision", "#58a6ff", "precision"), ("recall", "#f85149", "recall"),
+                          ("iou", "#3fb950", "IoU")]:
+        ok = [r["recall"] > 0 for r in sw]  # precision is undefined once nothing is called big rock
+        ax.plot([v for v, k in zip(x, ok) if k], [r[key] for r, k in zip(sw, ok) if k], "o-", color=col, ms=4,
+                label=lab)
+    ax.axvline(b["chosen_bias"], color=FG, lw=0.8, ls="--")
+    ax.text(b["chosen_bias"] + 0.08, 0.05, f"chosen b = {b['chosen_bias']:g}", fontsize=9)
+    ax.set_xlabel("bias b subtracted from the big-rock logit")
+    ax.set_ylabel("big-rock score on the calibration frames")
+    ax.set_ylim(0, 1.02)
+    ax.grid(color=GRID, lw=0.4)
+    ax.legend(frameon=False, fontsize=9)
+    ax.set_title("Trading big-rock recall for precision (chosen on held-out crowd frames, not on the test set)",
+                 fontsize=9.5)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+
+
+def diverse(samples, min_share=0.04):
+    """The test frame whose expert label is most mixed (most classes above min_share, then most labelled
+    pixels): a fair showcase for the risk map rather than a frame of pure soil or pure sand."""
+    best, key = samples[0], (-1, -1)
+    for s in samples:
+        lab = D.load_label(s)
+        n = np.bincount(lab[lab != D.IGNORE].ravel(), minlength=4)[:4]
+        if n.sum() == 0:
+            continue
+        k = (int((n / n.sum() >= min_share).sum()), int(n.sum()))
+        if k > key:
+            best, key = s, k
+    return best
+
+
 def make_all(checkpoint: Path, root: Path, data_root: Path, results: Path, out: Path):
     style()
     out = Path(out)
@@ -236,7 +296,9 @@ def make_all(checkpoint: Path, root: Path, data_root: Path, results: Path, out: 
     iou_bars(res, out / "iou_by_agreement.png")
     confusion_vs_paper(res, out / "confusion_vs_paper.png")
     reliability(res, out / "reliability.png", mc_key)
-    hazard_demo(model, test[len(test) // 3], out / "hazard_map.png")
+    if "bigrock_bias" in res:
+        bias_sweep(res, out / "bigrock_bias.png")
+    hazard_demo(model, diverse(test), out / "hazard_map.png")
     log = Path(checkpoint).with_name(Path(checkpoint).stem + "_log.json")
     if log.exists():
         training_curves(log, out / "training.png")

@@ -41,6 +41,10 @@ def main(argv=None):
 
     sub.add_parser("perseverance", help="fetch a few recent Perseverance NAVCAM frames (NASA raw-image feed)")
 
+    b = sub.add_parser("rare-bias", help="fit a big-rock logit bias on held-out frames and re-score the test set")
+    b.add_argument("checkpoint", type=Path)
+    b.add_argument("--results", type=Path, default=Path("results"))
+
     f = sub.add_parser("figures")
     f.add_argument("checkpoint", type=Path)
     f.add_argument("--results", type=Path, default=Path("results"))
@@ -71,17 +75,27 @@ def main(argv=None):
         a.out.mkdir(parents=True, exist_ok=True)
         tag = a.checkpoint.stem
         res = {"temperature": T,
-               "raw": E.evaluate(m, root),
                "temperature_scaled": E.evaluate(m, root, temperature=T),
                f"mc{a.mc}": E.evaluate(m, root, temperature=T, mc=a.mc)}
         pairs = D.m2020_pairs(root)
         if pairs:
-            res["m2020_crowd"] = E.evaluate_pairs(m, pairs, temperature=T)
+            res["m2020_crowd"] = E.evaluate_pairs(m, pairs[::4], temperature=T)  # every 4th frame
             print("Perseverance (crowd labels):", {k: res["m2020_crowd"][k] for k in ("n_images", "pixel_acc", "miou")})
         E.save(res, a.out / f"{tag}_test.json")
     elif a.cmd == "predict":
         from .predict import run
         run(a.checkpoint, a.images, a.out, a.mc)
+    elif a.cmd == "rare-bias":
+        from . import evaluate as E, model as M
+        from .train import splits
+        m = M.load(a.checkpoint)
+        _, _, calib = splits(root)
+        fit = E.fit_class_bias(m, calib, temperature=m.temperature)
+        path = a.results / f"{a.checkpoint.stem}_test.json"
+        res = json.loads(path.read_text())
+        res["bigrock_bias"] = {"fit_on": "val-calib (held-out crowd-labelled frames)", **fit,
+                               "test": E.evaluate_with_bias(m, root, fit["chosen_bias"], temperature=m.temperature)}
+        path.write_text(json.dumps(res, indent=1))
     elif a.cmd == "perseverance":
         from . import perseverance
         print(perseverance.fetch(a.data / "perseverance"))
