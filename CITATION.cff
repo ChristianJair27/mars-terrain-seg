@@ -8,6 +8,7 @@ repository-code: https://github.com/ChristianJair27/mars-terrain-seg
 authors:
   - family-names: Jair
     given-names: Christian
+    orcid: "https://orcid.org/0009-0006-4779-3708"
     affiliation: Kister Space
 references:
   - type: conference-paper
